@@ -13,7 +13,7 @@
   <key>CFBundleExecutable</key>
   <string>FigCraft</string>
   <key>CFBundleIdentifier</key>
-  <string>ai.storyteller.figcraft</string>
+  <string>com.publik.figcraft</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundlePackageType</key>
