@@ -80,6 +80,15 @@ pub enum MenuInput {
     MoveToPage,
 }
 
+/// The AI windows (desktop only, drawn by `crate::ai`): the first-launch setup and the two
+/// Object ▸ AI tools. Only their own buttons send a request; closing one sends nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AiDialog {
+    Setup,
+    DraftCopy,
+    GenerateImage,
+}
+
 impl AboutTab {
     pub const ALL: [AboutTab; 3] = [AboutTab::About, AboutTab::Contributors, AboutTab::Models];
 
@@ -150,6 +159,7 @@ pub fn keys(app: &mut FigApp, ctx: &Context) {
     }
     let u = &mut app.ui;
     let open = u.color_profile.is_some()
+        || u.ai_dialog.is_some()
         || u.menu_input.is_some()
         || u.find.is_some()
         || u.batch_rename.is_some()
@@ -161,6 +171,14 @@ pub fn keys(app: &mut FigApp, ctx: &Context) {
         || u.preferences
         || u.about;
     if !open || !ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        return;
+    }
+    // An AI window closes first (closing the first-launch one counts as Later).
+    if let Some(d) = u.ai_dialog.take() {
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::ai::dismissed(app, d);
+        #[cfg(target_arch = "wasm32")]
+        let _ = d;
         return;
     }
     if u.menu_input.take().is_some()
@@ -319,11 +337,21 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
                 let note = trf("{language}: draft translation, waiting for a native speaker's review.", &[("language", &lang.name)]);
                 crate::widgets::label(ui, &note, t.text_secondary);
             }
+            // publik API or the person's own key for Object ▸ AI (desktop only).
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                ui.add_space(12.0);
+                ui.label(RichText::new(tr("AI")).font(semibold(12.0)));
+                ui.add_space(4.0);
+                crate::ai::options_section(app, ui);
+            }
         });
         if !open {
             app.ui.preferences = false;
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::ai::show(app, ctx);
     crate::shortcuts_panel::show(app, ctx);
     if let Some((mut find, mut replace)) = app.ui.find.clone() {
         let mut open = true;

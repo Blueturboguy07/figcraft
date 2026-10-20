@@ -27,7 +27,13 @@ pub const UI_COMMANDS: &[&str] = &[
     "edit.copyAsSvg",
     "edit.copyAsPng",
     "edit.copyLink",
+    "ai.draftCopy",
+    "ai.generateImage",
 ];
+
+/// Object ▸ AI: the tools that send a request to publik API or the person's own key. Desktop only:
+/// the web build greys them out and its Actions palette doesn't list them.
+pub const AI_COMMANDS: &[&str] = &["ai.draftCopy", "ai.generateImage"];
 
 /// Run a menu item: some open dialogs or use platform services, the rest go to the engine.
 /// Paste: the system clipboard wins when it holds something newer than our own copy (layers copied
@@ -189,6 +195,9 @@ pub fn invoke(app: &mut FigApp, id: &str) {
             app.services.clipboard_set_text(&format!("figcraft://node/{}", ids.first().map(|i| i.0).unwrap_or(0)));
         }
         "edit.findReplace" => app.ui.find = Some((String::new(), String::new())),
+        // Object ▸ AI: the tool's window; only its own button sends a request.
+        "ai.draftCopy" => open_ai(app, crate::dialogs::AiDialog::DraftCopy),
+        "ai.generateImage" => open_ai(app, crate::dialogs::AiDialog::GenerateImage),
         // The Actions palette invokes commands without parameters. These values are edited in
         // Preferences; sending an empty object would either fail or silently reset a preference.
         "pref.language" | "pref.userName" | "pref.publishServer" | "pref.nudge" => {
@@ -268,10 +277,23 @@ fn figcraft_svg_export(doc: &figcraft_doc::Document, ids: &[figcraft_doc::NodeId
     String::from_utf8(bytes).ok()
 }
 
-/// Whether a menu id is available (registered in the engine or handled by the UI).
+/// Whether a menu id is available (registered in the engine or handled by the UI; the AI tools in
+/// the desktop app only).
 pub fn available(id: &str) -> bool {
+    if cfg!(target_arch = "wasm32") && AI_COMMANDS.contains(&id) {
+        return false;
+    }
     !id.is_empty() && (figcraft_engine::find_command(id).is_some() || UI_COMMANDS.contains(&id))
 }
+
+/// Open an Object ▸ AI tool's window (the desktop app; the web build has no AI tools).
+#[cfg(not(target_arch = "wasm32"))]
+fn open_ai(app: &mut FigApp, dialog: crate::dialogs::AiDialog) {
+    crate::ai::open(app, dialog);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn open_ai(_app: &mut FigApp, _dialog: crate::dialogs::AiDialog) {}
 
 /// Draw one level of the main menu: `prefix` is the menu path ("File", "Edit/Copy as").
 fn menu_level(app: &mut FigApp, ui: &mut Ui, prefix: &str) -> bool {
@@ -307,6 +329,10 @@ fn menu_level(app: &mut FigApp, ui: &mut Ui, prefix: &str) -> bool {
             }
         } else if let Some(rest) = m.menu.strip_prefix(prefix).and_then(|r| r.strip_prefix('/')) {
             let sub = rest.split('/').next().unwrap_or(rest).to_string();
+            // The web build has no Object ▸ AI.
+            if cfg!(target_arch = "wasm32") && sub == "AI" {
+                continue;
+            }
             if !subs.contains(&sub) {
                 subs.push(sub.clone());
                 last_sep = false;

@@ -6,6 +6,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod a11y;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ai;
 pub mod assets_panel;
 pub mod bidi;
 pub mod branch_ui;
@@ -517,6 +519,9 @@ pub struct UiState {
     pub preferences: bool,
     /// A menu command that needs a value before the engine can run it.
     pub menu_input: Option<dialogs::MenuInput>,
+    /// The AI window open in this window (desktop only): the first-launch setup, Draft copy or
+    /// Generate image.
+    pub ai_dialog: Option<dialogs::AiDialog>,
     /// File ▸ Rename: the file name in the left panel starts its inline rename on the next frame.
     pub rename_file: bool,
     /// What the interface size drew last frame and whether the window held it back. Set by
@@ -680,6 +685,7 @@ impl Default for UiState {
             about_tab: dialogs::AboutTab::About,
             preferences: false,
             menu_input: None,
+            ai_dialog: None,
             rename_file: false,
             ui_scale: ui_scale::plan(1.0, None, None),
             shortcuts_panel: false,
@@ -795,6 +801,11 @@ pub struct FigApp {
     /// The automation roots the app was started with: every frame and control request runs
     /// confined to them ([`windows::guard`]).
     pub automation_roots: Option<Arc<figcraft_engine::file_access::Roots>>,
+    /// AI through publik API or the person's own key (desktop only). `None` until the desktop app
+    /// installs it, and in tests and runs without a settings folder, where no AI window may
+    /// appear unasked.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub ai: Option<ai::Ai>,
 }
 
 /// What to do with the result of a command run in the background.
@@ -826,6 +837,8 @@ impl FigApp {
             pending_dialog: None,
             ui_context: None,
             automation_roots: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            ai: None,
         }
     }
 
@@ -1516,6 +1529,9 @@ impl FigApp {
         }
         // Files that arrived without a command (joined, recovered) take the kept View toggles too.
         self.session.apply_view_prefs();
+        // AI requests that finished, and the first-launch AI window once the window is up.
+        #[cfg(not(target_arch = "wasm32"))]
+        ai::frame(self);
         windows::begin(self, &ctx);
         let (files, prefs) = (self.session.docs.len(), self.session.prefs.clone());
         self.frame(ui);

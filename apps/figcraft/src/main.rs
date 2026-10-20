@@ -129,6 +129,12 @@ fn main() -> eframe::Result {
         );
         return Ok(());
     }
+    // Builder check (publikhq.com/skills/setup.md): the built app provisions publik API for real and
+    // prints one line. The builder who runs it is the consent.
+    if std::env::var_os("PUBLIK_SELF_TEST").is_some() {
+        println!("{}", figcraft_ui_egui::ai::self_test(&app_info()));
+        return Ok(());
+    }
     let args = args::parse(&args);
     if let Some(flag) = args.unknown.first() {
         eprintln!(
@@ -202,6 +208,16 @@ fn main() -> eframe::Result {
     figcraft_ui_egui::i18n::set(&session.prefs.language, figcraft_ui_egui::Services::system_language(&svc).as_deref());
     let mut fig = FigApp::new(session, Box::new(svc));
     fig.automation_roots = roots;
+    // AI through publik API or the person's own key; the first launch asks once. Only with a
+    // settings folder (the choice is kept there), and a run an agent drives (--control) doesn't ask
+    // unasked: Object ▸ AI and Preferences still offer it.
+    if services::config_dir().is_some() {
+        let mut ai = figcraft_ui_egui::ai::Ai::new(app_info());
+        if port.is_some() {
+            ai.skip_first_run();
+        }
+        fig.ai = Some(ai);
+    }
     fig.ui.home = false;
     // Files named on the command line are the user's too: their missing fonts are listed.
     fig.ui.font_checks = opened;
@@ -264,6 +280,19 @@ fn main() -> eframe::Result {
         startup::failed(e, port.is_some());
     }
     result
+}
+
+/// What publik needs to know about this build. The app token is public by design (it can only mint
+/// capped keys attributed to FigCraft) and lives at the repo root so source builds carry it.
+fn app_info() -> figcraft_ui_egui::ai::AppInfo {
+    figcraft_ui_egui::ai::AppInfo {
+        slug: "figcraft",
+        name: "FigCraft",
+        version: env!("CARGO_PKG_VERSION"),
+        app_token: include_str!("../../../publik-app-token.txt"),
+        dialects: &["chat_completions", "images"],
+        config_dir: services::config_dir(),
+    }
 }
 
 /// With nothing to open, whether the window starts in a new file rather than on the home screen.

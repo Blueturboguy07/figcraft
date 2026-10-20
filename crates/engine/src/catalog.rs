@@ -187,6 +187,10 @@ pub static MENU: &[MenuItem] = &[
     m!("Object/Select layer", "Select parent", "select.parent"),
     m!("Object/Select layer", "Select next sibling", "select.next"),
     m!("Object/Select layer", "Select previous sibling", "select.previous"),
+    // FigCraft's own (desktop): AI through publik API or the person's own key. The UI opens the
+    // tool's window, whose own button sends the request; not counted by `parity` (see `OWN`).
+    m!("Object/AI", "Draft copy…", "ai.draftCopy"),
+    m!("Object/AI", "Generate image…", "ai.generateImage"),
     // Text
     m!("Text", "Bold", "text.bold"),
     m!("Text", "Italic", "text.italic"),
@@ -289,7 +293,7 @@ pub fn items() -> impl Iterator<Item = &'static MenuItem> {
 }
 
 /// Items of FigCraft's own that the parity count leaves out (as it does the `collab.` ones).
-const OWN: [&str; 3] = ["file.newFromTemplate", "help.gettingStarted", "text.missingFonts"];
+const OWN: [&str; 5] = ["file.newFromTemplate", "help.gettingStarted", "text.missingFonts", "ai.draftCopy", "ai.generateImage"];
 
 /// Coverage: (implemented, total, missing ids). `extra` lists ids implemented by the UI layer.
 pub fn parity(extra: &[&str]) -> (usize, usize, Vec<&'static str>) {
