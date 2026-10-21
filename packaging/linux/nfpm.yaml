@@ -15,7 +15,7 @@ section: graphics
 priority: optional
 maintainer: ${FIGCRAFT_MAINTAINER}
 vendor: Learning Machines LLC
-homepage: https://getartcraft.com/apps/figcraft
+homepage: https://publikhq.com/figcraft
 license: MIT OR Apache-2.0
 description: |-
   Open-source, native interface design and prototyping tool.

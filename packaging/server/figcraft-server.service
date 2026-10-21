@@ -5,7 +5,7 @@
 
 [Unit]
 Description=FigCraft collaboration server
-Documentation=https://github.com/storytold/figcraft/blob/main/docs/server.md
+Documentation=https://github.com/Blueturboguy07/figcraft/blob/main/docs/server.md
 Wants=network-online.target
 After=network-online.target
 
