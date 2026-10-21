@@ -30,7 +30,7 @@ web-time = "1.1.0"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # publik API as the zero-setup AI option (or the person's own key): provisioning, the credential
 # file, the calls and the setup flow. Desktop only: it talks to the network through the system curl.
-craft-publik = { path = "../../../craft-publik", features = ["egui"] }
+craft-publik = { git = "https://github.com/Blueturboguy07/craft-publik", rev = "1da0e89298f3552a5e74d1e8b47d865028e13580", features = ["egui"] }
 
 [build-dependencies]
 serde_json = { workspace = true }
