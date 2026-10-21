@@ -9,7 +9,7 @@ const ERROR: &str = "WGPU error: Failed to create surface for any enabled backen
 fn the_message_carries_the_error_and_where_to_report_it() {
     let text = message(ERROR, false);
     assert!(text.contains(ERROR), "the error itself: {text}");
-    assert!(text.contains("https://github.com/storytold/figcraft/issues"), "where to report it: {text}");
+    assert!(text.contains("https://github.com/Blueturboguy07/figcraft/issues"), "where to report it: {text}");
 }
 
 #[test]
