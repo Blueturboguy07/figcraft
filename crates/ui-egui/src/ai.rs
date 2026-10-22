@@ -151,6 +151,11 @@ enum Shape {
 impl Shape {
     const ALL: [Shape; 3] = [Shape::Square, Shape::Landscape, Shape::Portrait];
 
+    /// The shapes a provider can draw: publik API draws 1024x1024 only; a person's own key has all three.
+    fn offered(publik: bool) -> &'static [Shape] {
+        if publik { &Self::ALL[..1] } else { &Self::ALL[..] }
+    }
+
     fn size(self) -> &'static str {
         match self {
             Shape::Square => "1024x1024",
@@ -733,11 +738,15 @@ fn generate_image_window(app: &mut FigApp, ctx: &Context) {
         prompt_field(ui, &mut ai.image.prompt, !busy, tr("A flat illustration of a mountain at dawn, soft colors, no text"));
         ui.add_space(8.0);
         ui.label(tr("Shape"));
-        let labels: Vec<&str> = Shape::ALL.iter().map(|s| s.label()).collect();
-        let active = Shape::ALL.iter().position(|s| *s == ai.shape).unwrap_or(0);
+        let shapes = Shape::offered(provider.is_publik());
+        if !shapes.contains(&ai.shape) {
+            ai.shape = Shape::Square;
+        }
+        let labels: Vec<&str> = shapes.iter().map(|s| s.label()).collect();
+        let active = shapes.iter().position(|s| *s == ai.shape).unwrap_or(0);
         if let Some(i) = widgets::segmented_text(ui, &labels, active)
             && !busy
-            && let Some(s) = Shape::ALL.get(i)
+            && let Some(s) = shapes.get(i)
         {
             ai.shape = *s;
         }
@@ -777,7 +786,7 @@ fn generate_image_window(app: &mut FigApp, ctx: &Context) {
             ai.image_target = target;
             ai.unplaced = None;
             let prompt = ai.image.prompt.trim().to_string();
-            let size = ai.shape.size();
+            let size = if provider.is_publik() { Shape::Square.size() } else { ai.shape.size() };
             ai.image.start(spawn(ui.ctx(), move || client::image_generate(&provider, &prompt, size)));
         }
     });
@@ -830,3 +839,15 @@ pub fn options_section(app: &mut FigApp, ui: &mut Ui) {
 #[cfg(test)]
 #[path = "ai_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod publik_shape_tests {
+    use super::Shape;
+
+    #[test]
+    fn publik_api_offers_square_only() {
+        assert_eq!(Shape::offered(true).len(), 1);
+        assert_eq!(Shape::offered(true)[0].size(), "1024x1024");
+        assert_eq!(Shape::offered(false).len(), 3);
+    }
+}
