@@ -38,6 +38,10 @@ esac
 export MACOSX_DEPLOYMENT_TARGET=11.0
 IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 SHORT_VERSION="${VERSION%%-*}"
+# publik's build number (packaging/PUBLIK_BUILD, or PUBLIK_BUILD in the environment) marks the
+# bundle's <App>Version as X.Y.Z+publik.N, so the launcher knows which build is installed.
+PUBLIK_BUILD="${PUBLIK_BUILD:-$(tr -d '[:space:]' < "$HERE/../PUBLIK_BUILD" 2>/dev/null || true)}"
+FULL_VERSION="$VERSION${PUBLIK_BUILD:+"+publik.$PUBLIK_BUILD"}"
 WORK="$CARGO_TARGET_DIR/macos-package"
 APP="$WORK/FigCraft.app"
 DMG="$DIST/figcraft-$VERSION-macos-$ARCH.dmg"
@@ -128,7 +132,7 @@ if [ -n "${CRAFT_FONTS_DIR:-}" ]; then
   mkdir -p "$APP/Contents/Resources/Licenses"
   copy_font_licences "$APP/Contents/Resources/Licenses"
 fi
-sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \
+sed -e "s/@VERSION@/$FULL_VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \
   -e "s/@BUILD_SHA@/${FIGCRAFT_BUILD_SHA:-unknown}/g" \
   "$HERE/Info.plist.in" >"$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist"
