@@ -1,6 +1,8 @@
 # Local builds pick up the optional craft-fonts checkout next to this repo (Inter etc.). When the
 # directory is missing the build warns and carries on with egui's bundled fonts and system fonts.
 [env]
+# `cargo test` and `cargo run` start the tools many times: they send no publik usage counts.
+DO_NOT_TRACK = "1"
 CRAFT_FONTS_DIR = { value = "../craft-fonts", relative = true }
 
 [alias]
