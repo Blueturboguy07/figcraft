@@ -26,6 +26,9 @@ mod linux_window;
 mod recovery;
 mod services;
 mod startup;
+// publik's usage counts (README: Usage counts). The file is publik's reference client, kept as it is.
+#[rustfmt::skip]
+mod publik_telemetry;
 
 #[cfg(all(test, target_os = "macos"))]
 mod apple_events_tests;
@@ -118,6 +121,12 @@ impl eframe::App for App {
     }
 }
 
+/// The version in publik's usage counts: the release tag without its `v`, for example `0.9.0-publik.4`.
+/// The build number comes from `packaging/PUBLIK_BUILD`, the file the bundle version comes from.
+fn publik_version() -> String {
+    format!("{}-publik.{}", env!("CARGO_PKG_VERSION"), include_str!("../../../packaging/PUBLIK_BUILD").trim())
+}
+
 fn main() -> eframe::Result {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -153,6 +162,10 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
+    // publik's usage counts: `app_opened` now, `active_session` every 30 minutes, on a background
+    // thread. After the early exits above, so `--version`, the self-test and a bad command line
+    // send nothing.
+    publik_telemetry::start("figcraft", &publik_version(), None);
     let port = args.control.or_else(|| std::env::var("FIGCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok()));
     // System fonts: index them in the background, then wake the UI (an idle window draws no frames)
     // to lay text out again with them.
