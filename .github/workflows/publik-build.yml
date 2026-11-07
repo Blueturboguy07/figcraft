@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: storytold/craft-fonts
-          ref: 43913056ce82a3fdad0ef69f6b88d1dc922a8104
+          ref: 37827adc41fd165f9a9234ac40f94dbad353aa69
           path: craft-fonts
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
@@ -47,6 +47,16 @@ jobs:
         with:
           key: publik-build-macos-universal
           cache-on-failure: true
+      - name: publik's tests (AI step, catalog strings, menu count); the job stops here when the port broke them
+        run: |
+          set -euo pipefail
+          # Object > AI, Preferences > AI and the AI windows (crates/ui-egui/src/ai.rs, ai_tests.rs), the
+          # catalogs without the Discord row (i18n/tests.rs) and the menu count with the AI items left
+          # out (crates/engine/src/catalog.rs OWN).
+          cargo test --locked -p figcraft-ui-egui --lib -- ai:: \
+            i18n::tests::every_key_in_the_code_is_in_the_english_catalog_and_no_other \
+            i18n::tests::catalogs_have_known_keys_and_matching_placeholders
+          cargo test --locked -p figcraft-engine --lib -- --exact tests::parity_catalog_mostly_covered
       - name: Build and package (ad-hoc signature, no notarization)
         run: |
           # The short commit, as publik's earlier builds carry it (<APP>_BUILD_SHA).
@@ -76,7 +86,7 @@ jobs:
             echo "commit=$(git rev-parse HEAD)"
             echo "build_sha=$(git rev-parse --short HEAD)"
             echo "publik_build=$(tr -d '[:space:]' < packaging/PUBLIK_BUILD)"
-            echo "fonts_ref=43913056ce82a3fdad0ef69f6b88d1dc922a8104"
+            echo "fonts_ref=37827adc41fd165f9a9234ac40f94dbad353aa69"
             echo "runner=$(sw_vers -productName) $(sw_vers -productVersion) $(uname -m)"
             echo "rustc=$(rustc -V)"
             echo "cargo=$(cargo -V)"
