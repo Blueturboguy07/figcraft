@@ -1,10 +1,10 @@
 //! View menu, preferences and tools. View state is per document and drivable like everything else.
 
-use figcraft_doc::*;
+use figcraft_doc::NodeId;
 use serde_json::{Value, json};
 
 use super::{CommandSpec, ok};
-use crate::params::*;
+use crate::params::{boolean, get, num, num_or, req_index, req_num, req_string, string};
 use crate::tools::ToolId;
 use crate::{EngineError, Result, Session, ViewState, bad, spec};
 
@@ -194,15 +194,32 @@ fn region(s: &mut Session, step: i64) -> Result<Value> {
     ok()
 }
 
+/// Step the interface size through the Preferences sizes: `dir` 1 up, -1 down, 0 back to the
+/// system's size (1). At an end it stays. Kept at once, as a size picked in Preferences is.
+fn ui_scale_step(s: &mut Session, dir: i32) -> Result<Value> {
+    let now = s.prefs.ui_scale;
+    let next = match dir {
+        0 => 1.0,
+        1 => crate::UI_SCALE_SIZES.iter().copied().find(|v| *v > now + 1e-9).unwrap_or(now),
+        _ => crate::UI_SCALE_SIZES.iter().rev().copied().find(|v| *v < now - 1e-9).unwrap_or(now),
+    };
+    if (next - now).abs() > 1e-9 {
+        s.prefs.ui_scale = next;
+        s.prefs_unsaved = true;
+    }
+    Ok(json!({"scale": s.prefs.ui_scale}))
+}
+
 fn pref(s: &mut Session, p: &Value, f: fn(&mut crate::Prefs) -> &mut bool) -> Result<Value> {
     let slot = f(&mut s.prefs);
     *slot = boolean(p, "on").unwrap_or(!*slot);
     Ok(json!({"on": *slot}))
 }
 
-fn tool(s: &mut Session, t: ToolId) -> Result<Value> {
-    // A file you can't edit now (view only, or on its way to a server): moving around only.
-    if let Some(why) = s.active_read_only().filter(|_| !matches!(t, ToolId::Move | ToolId::Hand)) {
+pub(crate) fn tool(s: &mut Session, t: ToolId) -> Result<Value> {
+    // A file you can't edit now (view only, or on its way to a server): moving around only, and
+    // commenting with a comment link.
+    if let Some(why) = s.active_read_only().filter(|why| !crate::live::tool_left(why, t)) {
         return Err(EngineError::Disabled(format!("tool.{}", t.id()), why.into()));
     }
     s.set_tool(t);
@@ -304,6 +321,13 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("view.snapObjects", "Snap to objects", "{on?}", false, |s, p| toggle(s, p, "view.snapObjects")),
         spec!("view.snapPixel", "Snap to pixel grid", "{on?}", false, |s, p| toggle(s, p, "view.snapPixel")),
         spec!("view.toggleUi", "Show/Hide UI", "{on?}", false, |s, p| flag(s, p, |v| &mut v.ui_hidden)),
+        spec!(
+            "view.minimize",
+            "Minimize the interface",
+            "{on?}  collapses the navigation bar and both sidebars and keeps the toolbar (Shift+Cmd/Ctrl+\\, the Minimize button by the file name); the right sidebar shows while something is selected",
+            false,
+            |s, p| flag(s, p, |v| &mut v.ui_minimized)
+        ),
         spec!("view.fullscreen", "Full screen", "{on?}  the window fills the screen (the desktop app; a no-op headless)", false, |s, p| {
             s.request_ui("window.fullscreen", json!({"on": boolean(p, "on")}));
             ok()
@@ -369,11 +393,18 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("pref.renameDuplicates", "Rename duplicated layers", "{on?}", false, |s, p| pref(s, p, |x| &mut x.rename_duplicates)),
         spec!("pref.showDimensions", "Show dimensions on objects", "{on?}", false, |s, p| pref(s, p, |x| &mut x.show_dimensions)),
         spec!("pref.numberKeysOpacity", "Use number keys for opacity", "{on?}", false, |s, p| pref(s, p, |x| &mut x.number_keys_opacity)),
+        spec!(
+            "pref.scrollWheelZoom",
+            "Scroll wheel zoom",
+            "{on?}  a mouse wheel zooms the canvas about the pointer and Cmd/Ctrl+wheel scrolls it (Shift+wheel still scrolls sideways; trackpads are unchanged) → {on}",
+            false,
+            |s, p| pref(s, p, |x| &mut x.scroll_wheel_zoom)
+        ),
         spec!("pref.reduceMotion", "Reduce motion", "{on?}", false, |s, p| pref(s, p, |x| &mut x.reduce_motion)),
         spec!(
             "pref.uiScale",
             "Interface size",
-            "{scale?: a size from 0.75 to 3 relative to the system's display scale, 1 being the system's own size, so 1.25 is 125 %, not 125 (outside the range it stops at the nearest end; \"auto\" is 1; omit: just read it)} → {scale}: how large the whole interface is drawn; the canvas zoom is separate",
+            "{scale? (a size from 0.75 to 3 relative to the system's display scale: 1 is the system's own size, so 1.25 is 125 %, not 125; outside the range it stops at the nearest end; \"auto\" is 1; omit: just read it)} → {scale}: how large the whole interface is drawn; the canvas zoom is separate",
             false,
             |s, p| {
                 match get(p, "scale") {
@@ -387,6 +418,21 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"scale": s.prefs.ui_scale}))
             }
         ),
+        spec!(
+            "pref.uiScaleUp",
+            "Larger interface",
+            "{}  the next of the Preferences sizes above the current one (the interface size keys of Accessibility at Figma); at the largest it stays → {scale}",
+            false,
+            |s, _| ui_scale_step(s, 1)
+        ),
+        spec!(
+            "pref.uiScaleDown",
+            "Smaller interface",
+            "{}  the next of the Preferences sizes below the current one; at the smallest it stays → {scale}",
+            false,
+            |s, _| ui_scale_step(s, -1)
+        ),
+        spec!("pref.uiScaleReset", "Default interface size", "{}  back to the system's own size (1) → {scale}", false, |s, _| ui_scale_step(s, 0)),
         spec!("pref.autoSave", "Save files automatically", "{on?}", false, |s, p| pref(s, p, |x| &mut x.auto_save)),
         spec!("pref.startOnHome", "Start on the Home screen", "{on?}", false, |s, p| pref(s, p, |x| &mut x.start_on_home)),
         spec!("pref.nudge", "Nudge amount", "{small?, big?}", false, |s, p| {
@@ -394,12 +440,19 @@ pub fn specs() -> Vec<CommandSpec> {
             s.prefs.nudge_big = num(p, "big").unwrap_or(s.prefs.nudge_big).clamp(0.01, 10000.0);
             Ok(json!({"small": s.prefs.nudge_small, "big": s.prefs.nudge_big}))
         }),
-        spec!("pref.userName", "Your name in comments", "{name (blank: the default, \"You\")}", false, |s, p| {
-            let name = req_string("pref.userName", p, "name")?;
-            let name: String = name.trim().chars().filter(|c| !c.is_control()).take(64).collect();
-            s.prefs.user_name = if name.is_empty() { super::comment::DEFAULT_AUTHOR.into() } else { name };
-            Ok(json!({"name": s.prefs.user_name}))
-        }),
+        spec!(
+            "pref.userName",
+            "Your name",
+            "{name (blank: the default: \"You\" on comments, \"Guest N\" in live sessions)} → {name}: what your comments are signed with and others see you as in live sessions; the live sessions you're in show the new name at once (blank keeps the name they gave you until you join again)",
+            false,
+            |s, p| {
+                let name = req_string("pref.userName", p, "name")?;
+                let name: String = name.trim().chars().filter(|c| !c.is_control()).take(crate::live::MAX_NAME).collect();
+                s.prefs.user_name = if name.is_empty() { super::comment::DEFAULT_AUTHOR.into() } else { name };
+                s.live_rename();
+                Ok(json!({"name": s.prefs.user_name}))
+            }
+        ),
         spec!(
             "pref.publishServer",
             "Server for online sharing",
@@ -427,7 +480,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "pref.language",
             "Interface language",
-            "{language: system|en|cs|ru|es|es-419|fr|de|pt-BR|ja|ko|zh-Hans|…; else English}",
+            "{language: system|en|bs|cs|ru|es|es-419|fr|de|pt-BR|ja|ka|ko|vi|zh-Hans|…; else English}",
             false,
             |s, p| {
                 let lang = req_string("pref.language", p, "language")?;
@@ -465,11 +518,14 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "tool.set",
             "Choose tool",
-            "{tool: move|scale|hand|frame|section|slice|rectangle|line|arrow|ellipse|polygon|star|pen|pencil|text|comment|shapeBuilder}",
+            "{tool: move|scale|hand|frame|section|slice|rectangle|line|arrow|ellipse|polygon|star|pen|pencil|text|comment|shapeBuilder | on boards: sticky|shape|connector|marker|highlighter|eraser|stamp}",
             false,
             |s, p| {
                 let t = req_string("tool.set", p, "tool")?;
                 let t = ToolId::from_id(&t).ok_or_else(|| bad("tool.set", format!("unknown tool `{t}`")))?;
+                if t.on_boards() {
+                    crate::board::require(s, &format!("tool.{}", t.id()))?;
+                }
                 tool(s, t)
             }
         ),
@@ -532,9 +588,19 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("tool.pen", "Pen", "{}", false, |s, _| tool(s, ToolId::Pen)),
         spec!("tool.pencil", "Pencil", "{}", false, |s, _| tool(s, ToolId::Pencil)),
         spec!("tool.text", "Text", "{}", false, |s, _| tool(s, ToolId::Text)),
+        spec!("tool.textOnPath", "Text on a path", "{}  a click on a shape's or vector's path puts new text on it", false, |s, _| {
+            tool(s, ToolId::TextOnPath)
+        }),
         spec!("tool.comment", "Comment", "{}", false, |s, _| tool(s, ToolId::Comment)),
         spec!("tool.shapeBuilder", "Shape builder", "{}", false, |s, _| tool(s, ToolId::ShapeBuilder)),
-        spec!("edit.pickColor", "Pick color", "{}", false, |s, _| tool(s, ToolId::Eyedropper)),
+        // `apply: false` is for the UI colour picker: the eyedropper only samples (into
+        // `ToolState::picked`) and the picker writes the colour to the paint it edits.
+        spec!("edit.pickColor", "Pick color", "{apply?}", false, |s, p| {
+            let r = tool(s, ToolId::Eyedropper)?;
+            s.tool.pick_only = !boolean(p, "apply").unwrap_or(true);
+            s.tool.picked = None;
+            Ok(r)
+        }),
     ]
 }
 

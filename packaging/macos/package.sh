@@ -19,7 +19,7 @@ HERE="$ROOT/packaging/macos"
 
 ARCH=universal
 SKIP_BUILD=0
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
   case "$1" in
     --arch) ARCH="$2"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
@@ -48,9 +48,9 @@ DMG="$DIST/figcraft-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/figcraft-cli-$VERSION-macos-$ARCH.zip"
 
 NOTARIZE=0
-if [ "$IDENTITY" = "-" ]; then
+if [[ "$IDENTITY" = "-" ]]; then
   warn "macOS: ad-hoc signing (no MACOS_SIGN_IDENTITY); artifacts are not notarized"
-elif [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+elif [[ -n "${APPLE_ID:-}" ]] && [[ -n "${APPLE_PASSWORD:-}" ]] && [[ -n "${APPLE_TEAM_ID:-}" ]]; then
   NOTARIZE=1
 elif [ -n "${NOTARY_PROFILE:-}" ]; then
   # A local build: `xcrun notarytool store-credentials <profile>` holds the Apple ID in the keychain.
@@ -62,7 +62,7 @@ fi
 echo "==> FigCraft $VERSION for macOS ($ARCH; ${BINS[*]}), identity: $IDENTITY, notarize: $NOTARIZE"
 
 # ---- build -------------------------------------------------------------------------------------
-if [ "$SKIP_BUILD" = 0 ]; then
+if [[ "$SKIP_BUILD" = 0 ]]; then
   args=()
   for t in "${TARGETS[@]}"; do args+=(--target "$t"); done
   (cd "$ROOT" && cargo build --release --locked "${CARGO_PKGS[@]}" "${args[@]}")
@@ -81,9 +81,9 @@ done
 sign() {
   # Hardened runtime + secure timestamp for a real identity; ad-hoc can't be timestamped.
   local ts=(--timestamp)
-  [ "$IDENTITY" = "-" ] && ts=(--timestamp=none)
+  [[ "$IDENTITY" = "-" ]] && ts=(--timestamp=none)
   local kc=()
-  [ -n "${MACOS_KEYCHAIN:-}" ] && kc=(--keychain "$MACOS_KEYCHAIN")
+  [[ -n "${MACOS_KEYCHAIN:-}" ]] && kc=(--keychain "$MACOS_KEYCHAIN")
   codesign --force --sign "$IDENTITY" ${kc[@]+"${kc[@]}"} "${ts[@]}" "$@"
 }
 
@@ -100,8 +100,8 @@ notarize() {
   echo "$out"
   id="$(printf '%s' "$out" | plutil -extract id raw -o - - 2>/dev/null || true)"
   status="$(printf '%s' "$out" | plutil -extract status raw -o - - 2>/dev/null || true)"
-  if [ "$status" != "Accepted" ]; then
-    if [ -n "$id" ]; then
+  if [[ "$status" != "Accepted" ]]; then
+    if [[ -n "$id" ]]; then
       xcrun notarytool log "$id" "${auth[@]}" || true
     fi
     echo "error: notarization of $(basename "$file") failed (status: ${status:-unknown})" >&2
@@ -127,8 +127,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable and icon carry the display name (CFBundleExecutable / CFBundleIconFile).
 cp "$WORK/bin/figcraft" "$APP/Contents/MacOS/FigCraft"
 cp "$WORK/FigCraft.icns" "$APP/Contents/Resources/FigCraft.icns"
+cp "$ROOT/NOTICE" "$APP/Contents/Resources/"
 # Licences of the embedded craft-fonts fonts (only when built with CRAFT_FONTS_DIR).
-if [ -n "${CRAFT_FONTS_DIR:-}" ]; then
+if [[ -n "${CRAFT_FONTS_DIR:-}" ]]; then
   mkdir -p "$APP/Contents/Resources/Licenses"
   copy_font_licences "$APP/Contents/Resources/Licenses"
 fi
@@ -144,7 +145,7 @@ sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP/Contents/
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP"
 codesign --verify --strict --deep --verbose=2 "$APP"
 
-if [ "$NOTARIZE" = 1 ]; then
+if [[ "$NOTARIZE" = 1 ]]; then
   ditto -c -k --keepParent "$APP" "$WORK/FigCraft-notarize.zip"
   notarize "$WORK/FigCraft-notarize.zip"
   retry xcrun stapler staple "$APP"
@@ -192,7 +193,7 @@ if ! codesign --verify --strict --deep --verbose=2 "$MOUNT/FigCraft.app"; then
   exit 1
 fi
 hdiutil_retry detach detach "$MOUNT" >/dev/null
-if [ "$NOTARIZE" = 1 ]; then
+if [[ "$NOTARIZE" = 1 ]]; then
   notarize "$DMG"
   retry xcrun stapler staple "$DMG"
   retry xcrun stapler validate "$DMG"
@@ -200,7 +201,7 @@ if [ "$NOTARIZE" = 1 ]; then
 fi
 
 # ---- CLI ---------------------------------------------------------------------------------------
-if [ "$HAS_CLI" = 1 ]; then
+if [[ "$HAS_CLI" = 1 ]]; then
   echo "==> building $CLI_ZIP"
   CLI_DIR="$WORK/figcraft-cli-$VERSION-macos-$ARCH"
   mkdir -p "$CLI_DIR"
@@ -214,7 +215,7 @@ if [ "$HAS_CLI" = 1 ]; then
   ditto -c -k --keepParent "$CLI_DIR" "$CLI_ZIP"
   # notarytool accepts a zip of the bare binary. A bare Mach-O can't carry a stapled ticket, so
   # Gatekeeper looks the notarization up online when a quarantined copy first runs.
-  if [ "$NOTARIZE" = 1 ]; then notarize "$CLI_ZIP"; fi
+  if [[ "$NOTARIZE" = 1 ]]; then notarize "$CLI_ZIP"; fi
   "$WORK/bin/figcraft-cli" --version
 else
   warn "apps/figcraft-cli is not in this workspace: no CLI zip"

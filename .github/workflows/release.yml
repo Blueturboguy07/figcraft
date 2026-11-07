@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -25,8 +26,13 @@ jobs:
     with:
       app-name: figcraft
       app-title: FigCraft
-      craft-fonts-ref: 43913056ce82a3fdad0ef69f6b88d1dc922a8104
+      # Combined Latin presentation and core UI catalog. Required web builds enforce
+      # Inter Regular/SemiBold and Noto Sans Georgian Regular after asset-policy filtering.
+      craft-fonts-ref: 37827adc41fd165f9a9234ac40f94dbad353aa69
       has-server: true
+      # The browser has no system fonts: without craft-fonts the web build can't draw text (#885).
+      # crates/text/build.rs keeps the web allowlist small (Inter and Georgian).
+      web-craft-fonts: true
       version: ${{ inputs.version }}
       # publik has no Windows certificate yet: the x64 build ships unsigned and says so.
       windows-signing-required: false
@@ -45,3 +51,4 @@ jobs:
       AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
       AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
       AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
+      # No LINUX_SIGNING_KEY: publik's trimmed workflow builds no Linux packages and declares no such secret.

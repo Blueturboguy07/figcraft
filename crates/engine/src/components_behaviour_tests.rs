@@ -195,6 +195,67 @@ fn pasted_component_instances_keep_the_copied_transform_in_the_target_frame() {
 }
 
 #[test]
+fn duplicating_a_main_component_makes_a_linked_instance() {
+    for rename in [false, true] {
+        let mut s = Session::new();
+        ex(&mut s, "pref.renameDuplicates", json!({"on": rename}));
+        let k = kit(&mut s);
+        let rect = idv(&ex(&mut s, "shape.rectangle", json!({"x": 0, "y": 300, "width": 50, "height": 50, "props": {"name": "Box"}})));
+        let before = s.doc().unwrap().clone();
+        let out = ex(&mut s, "edit.duplicate", json!({"ids": [k.card, rect]}));
+        let ids: Vec<NodeId> = out["ids"].as_array().unwrap().iter().filter_map(crate::params::id_of).collect();
+        assert_eq!(s.selection(), ids);
+        let copy = *ids.iter().find(|i| matches!(node(&s, **i).kind, NodeKind::Instance { .. })).expect("the main's copy is an instance");
+        assert_eq!(component_of(&s, copy), k.card);
+        assert_eq!(node(&s, copy).name, "Card", "instances keep their default name (rename={rename})");
+        assert_eq!(node(&s, copy).parent, Some(s.page().unwrap()));
+        let (b, c) = (s.doc().unwrap().world_bounds(k.card).unwrap(), s.doc().unwrap().world_bounds(copy).unwrap());
+        assert_eq!((c.x0, c.y0, c.width(), c.height()), (b.x1 + 100.0, b.y0, b.width(), b.height()), "a top-level frame's offset");
+        let other = *ids.iter().find(|i| **i != copy).unwrap();
+        assert!(matches!(node(&s, other).kind, NodeKind::Rectangle), "other layers are still copied");
+        ex(&mut s, "node.set", json!({"id": k.title, "props": {"characters": "Updated"}}));
+        assert_eq!(chars(&s, copy_of(&s, copy, k.title)), "Updated", "the instance follows its main");
+        ex(&mut s, "edit.undo", json!({}));
+        ex(&mut s, "edit.undo", json!({}));
+        assert_eq!(*s.doc().unwrap(), before, "undo restores exactly");
+        healthy(&s);
+    }
+}
+
+#[test]
+fn alt_dragging_a_main_component_copies_an_instance() {
+    use crate::tools::{PointerEvent, PointerKind};
+    let mut s = Session::new();
+    let f = idv(&ex(&mut s, "frame.create", json!({"x": 0, "y": 0, "width": 100, "height": 100, "name": "Tile"})));
+    let main = idv(&ex(&mut s, "component.create", json!({"ids": [f]})));
+    let ev = |kind, x| PointerEvent { alt: true, ..PointerEvent::at(kind, x, 50.0, 1.0) };
+    s.pointer(&ev(PointerKind::Down, 50.0)).unwrap();
+    s.pointer(&ev(PointerKind::Move, 150.0)).unwrap();
+    s.pointer(&ev(PointerKind::Move, 250.0)).unwrap();
+    s.pointer(&ev(PointerKind::Up, 250.0)).unwrap();
+    let [copy] = s.selection()[..] else { panic!("one copy selected") };
+    assert_eq!(component_of(&s, copy), main);
+    assert_eq!(s.doc().unwrap().world_bounds(copy).unwrap().x0, 200.0);
+    assert_eq!(s.doc().unwrap().world_bounds(main).unwrap().x0, 0.0, "the main stays");
+    healthy(&s);
+}
+
+#[test]
+fn duplicating_a_variant_adds_a_variant_to_its_set() {
+    let mut s = Session::new();
+    let (set, _, hover) = button_set(&mut s);
+    let copy = crate::params::id_of(&ex(&mut s, "edit.duplicate", json!({"ids": [hover]}))["ids"][0]).unwrap();
+    assert!(matches!(node(&s, copy).kind, NodeKind::Component { .. }));
+    assert_eq!(node(&s, copy).parent, Some(set));
+    assert_eq!(kids(&s, set).len(), 3);
+    // A whole set duplicates as a new set of variants.
+    let set2 = crate::params::id_of(&ex(&mut s, "edit.duplicate", json!({"ids": [set]}))["ids"][0]).unwrap();
+    assert!(matches!(node(&s, set2).kind, NodeKind::ComponentSet { .. }));
+    assert!(kids(&s, set2).iter().all(|v| matches!(node(&s, *v).kind, NodeKind::Component { .. })));
+    healthy(&s);
+}
+
+#[test]
 fn overridable_properties_stay_through_main_edits_and_reset() {
     // (what, layer, group, override on the instance, the same property edited on the main, read,
     // derivation)
@@ -276,6 +337,15 @@ fn overridable_properties_stay_through_main_edits_and_reset() {
             Some(json!({"paragraphSpacing": 2})),
             |n| text(n).paragraph_spacing.to_string(),
             "a text property like the others",
+        ),
+        (
+            "wrap style",
+            Layer::Title,
+            "textStyle",
+            json!({"wrapStyle": "balance"}),
+            Some(json!({"wrapStyle": "pretty"})),
+            |n| format!("{:?}", text(n).wrap_style),
+            "a text property like the others (#1827)",
         ),
         (
             "padding",
@@ -451,7 +521,6 @@ fn what_instances_cannot_override_is_refused() {
         ),
         ("remove auto layout", "layout.remove", json!({"ids": ["$"]}), Layer::Row, "structure of the instance"),
         ("reorder layers", "node.reorder", json!({"id": "$", "index": 3}), Layer::Bg, "\"the order, or z-index, of any layers within the instance\""),
-        ("delete a layer", "edit.delete", json!({"ids": ["$"]}), Layer::Bg, "layers can only be hidden"),
         (
             "add a layer",
             "shape.rectangle",
@@ -593,6 +662,64 @@ fn switching_variants_keeps_overrides_where_the_variants_agreed() {
     s.undo().unwrap();
     assert_eq!(component_of(&s, i), default, "undo restores the variant ...");
     assert_eq!(fill(&s, layer(&s, i, "Bg").unwrap()), "FF00FF", "... and its overrides");
+    healthy(&s);
+}
+
+/// A "Layout" set: Row (horizontal, hugging, a 40 wide "A") and Stacked (vertical, fixed 300 wide,
+/// "A" filling it). Returns (set, row, stacked).
+fn layout_set(s: &mut Session) -> (NodeId, NodeId, NodeId) {
+    let mut variants = Vec::new();
+    for (k, (name, props, child)) in [
+        ("Layout=Row", json!({"layout": "horizontal", "gap": 8, "sizingH": "hug", "sizingV": "hug", "fills": []}), json!({})),
+        (
+            "Layout=Stacked",
+            json!({"layout": "vertical", "gap": 8, "sizingH": "fixed", "width": 300, "sizingV": "hug", "fills": []}),
+            json!({"sizingH": "fill"}),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let c = idv(&ex(s, "node.create", json!({"type": "component", "name": name, "x": k as f64 * 400.0, "props": props})));
+        ex(s, "node.create", json!({"type": "rectangle", "parent": c, "name": "A", "width": 40, "height": 20, "props": child}));
+        variants.push(c);
+    }
+    let set = idv(&ex(s, "component.combineVariants", json!({"ids": variants.clone()})));
+    (set, variants[0], variants[1])
+}
+
+#[test]
+fn switching_variants_takes_the_new_variants_resizing_unless_the_instance_set_its_own() {
+    let mut s = Session::new();
+    let (set, row, stacked) = layout_set(&mut s);
+    let i = idv(&ex(&mut s, "instance.create", json!({"component": set, "x": 0, "y": 200})));
+    assert_eq!(component_of(&s, i), row);
+    ex(&mut s, "instance.setProperties", json!({"ids": [i], "properties": {"Layout": "Stacked"}}));
+    assert_eq!(component_of(&s, i), stacked);
+    let direct = idv(&ex(&mut s, "instance.create", json!({"component": stacked, "x": 0, "y": 400})));
+    let (n, d) = (node(&s, i), node(&s, direct));
+    assert_eq!(n.child_layout.sizing_h, Sizing::Fixed, "Row's Hug was never the instance's own: it takes Stacked's Fixed");
+    assert_eq!((n.width, n.child_layout.sizing_h), (d.width, d.child_layout.sizing_h), "the same as an instance made from Stacked");
+    let a = layer(&s, i, "A").unwrap();
+    assert_eq!((node(&s, a).child_layout.sizing_h, node(&s, a).width), (Sizing::Fill, 300.0), "A fills the 300 wide instance");
+    // Filling an auto layout parent afterwards leaves A filling, with nothing turned into an override.
+    let col = idv(&ex(
+        &mut s,
+        "node.create",
+        json!({"type": "frame", "name": "Column", "x": 600, "y": 0, "width": 500, "props": {"layout": "vertical", "sizingH": "fixed", "sizingV": "hug", "fills": []}}),
+    ));
+    ex(&mut s, "node.reparent", json!({"ids": [i], "parent": col}));
+    ex(&mut s, "node.set", json!({"ids": [i], "props": {"sizingH": "fill"}}));
+    let a = layer(&s, i, "A").unwrap();
+    assert_eq!(node(&s, a).child_layout.sizing_h, Sizing::Fill, "A still fills");
+    assert!(!node(&s, a).overrides.contains("resizing"), "A's resizing is still the main's");
+    assert_eq!(node(&s, a).width, node(&s, i).width);
+    // Resizing the instance set itself stays across a switch.
+    let own = idv(&ex(&mut s, "instance.create", json!({"component": set, "x": 0, "y": 600})));
+    ex(&mut s, "node.set", json!({"ids": [own], "props": {"minWidth": 120}}));
+    ex(&mut s, "instance.setProperties", json!({"ids": [own], "properties": {"Layout": "Stacked"}}));
+    assert_eq!(node(&s, own).child_layout.min_w, Some(120.0), "its own min width stays");
+    assert_eq!(node(&s, own).child_layout.sizing_h, Sizing::Fixed, "its sizing, still Row's, follows Stacked");
     healthy(&s);
 }
 
@@ -817,4 +944,59 @@ fn auto_layout_instances_follow_their_main() {
     ex(&mut s, "node.set", json!({"id": chip, "props": {"gap": 12}}));
     assert_eq!(node(&s, i).child_layout.min_w, Some(80.0));
     healthy(&s);
+}
+
+#[test]
+fn a_new_component_set_is_named_after_its_first_variant() {
+    // "Button/State=Hover" groups under "Button": the set takes the path before the last '/'.
+    // A bare property name ("State=Default, Size=Small") names no set, and neither does an empty
+    // name: the set gets the next numbered default, like a new component. A plain name is kept.
+    let rows = [
+        ("Button/State=Hover", "Button", "slash-prefixed: the path before the last '/'"),
+        ("Icons/Arrow/Dir=Up", "Icons/Arrow", "nested path: everything before the last '/'"),
+        ("State=Default, Size=Small", "Component 1", "bare prop=value: not \"State\""),
+        ("", "Component 1", "empty name: the numbered default"),
+    ];
+    for (name, expected, why) in rows {
+        let mut s = Session::new();
+        let f = idv(&ex(&mut s, "frame.create", json!({"x": 0, "y": 0, "width": 40, "height": 20})));
+        ex(&mut s, "node.set", json!({"id": f, "props": {"name": name}}));
+        let c = idv(&ex(&mut s, "component.create", json!({"ids": [f]})));
+        assert_eq!(node(&s, c).name, name, "{why}: the variant keeps its name");
+        let set = idv(&ex(&mut s, "component.combineVariants", json!({"ids": [c]})));
+        assert_eq!(node(&s, set).name, expected, "{why}");
+        healthy(&s);
+    }
+
+    // Add variant on a lone component (a variant property on it) wraps it in a set named after it.
+    let mut s = Session::new();
+    let f = idv(&ex(&mut s, "frame.create", json!({"x": 0, "y": 0, "width": 40, "height": 20, "name": "Button"})));
+    let c = idv(&ex(&mut s, "component.create", json!({"ids": [f]})));
+    let set = idv(&ex(&mut s, "component.addProperty", json!({"id": c, "name": "State", "type": "variant"})));
+    assert_eq!(node(&s, set).name, "Button");
+    assert_eq!(node(&s, c).name, "State=Default");
+    healthy(&s);
+}
+
+/// "You can't delete a layer or object from an instance. If you try, Figma will only toggle the
+/// layer's visibility instead of removing it." (Guide to auto layout; the flows article says the
+/// same). Delete hides the layer, an override; the main component is untouched.
+#[test]
+fn deleting_a_layer_inside_an_instance_hides_it_instead() {
+    let mut s = Session::new();
+    let k = kit(&mut s);
+    let target = k.copy(&s, Layer::Bg);
+    let steps = undo_len(&s);
+    let r = s.execute("edit.delete", &json!({"ids": [target]})).unwrap();
+    assert_eq!((r["hidden"].clone(), r["deleted"].clone()), (json!([target]), json!([])));
+    let doc = s.doc().unwrap();
+    assert!(doc.node(target).is_some_and(|n| !n.visible), "hidden, not removed");
+    assert!(doc.node(k.bg).is_some_and(|n| n.visible), "the main is untouched");
+    assert_eq!(doc.node(k.inst).unwrap().children.len(), doc.node(k.card).unwrap().children.len(), "the structure is intact");
+    assert_eq!(undo_len(&s), steps + 1, "one undo step");
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.doc().unwrap().node(target).is_some_and(|n| n.visible));
+    // The instance itself still goes away.
+    s.execute("edit.delete", &json!({"ids": [k.inst]})).unwrap();
+    assert!(s.doc().unwrap().node(k.inst).is_none());
 }
