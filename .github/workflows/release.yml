@@ -20,6 +20,8 @@ concurrency:
 
 jobs:
   release:
+    # Never at a publik release tag (v*-publik.*): a run there could upload files into publik's release.
+    if: ${{ !contains(github.ref, '-publik') }}
     # publik's trimmed copy of storytold/craft-common-actions (free macOS runner, Windows x64 only,
     # Linux and Flatpak off). Tracked at @main like upstream.
     uses: Blueturboguy07/craft-common-actions/.github/workflows/release.yml@main
