@@ -267,19 +267,12 @@ fn first_launch_info() -> AppInfo {
 }
 
 #[test]
-fn the_first_launch_window_waits_for_the_gate_and_closing_it_counts_as_later() {
-    // The publik gate has not passed in a test: the first launch holds its question until it does
-    // (the gate's own screen is up until then; "Use my own key" there leads to this window).
+fn the_first_launch_window_opens_once_and_closing_it_counts_as_later() {
     let mut u = Ui::new(Session::new());
     u.app.ai = Some(Ai::new(first_launch_info()));
     for _ in 0..5 {
         u.frame(vec![]);
     }
-    assert_eq!(u.app.ui.ai_dialog, None, "the first launch waits for the gate");
-    assert!(!ai(&u).first_run_checked, "and still asks once the gate passed");
-    // Past the gate, the window is due: it opens once, and closing it counts as Later.
-    u.app.ai.as_mut().unwrap().setup_due = true;
-    u.frame(vec![]);
     assert_eq!(u.app.ui.ai_dialog, Some(AiDialog::Setup), "the first launch asks");
     let shown = texts(&mut u);
     assert!(shows(&shown, "Use my own key"), "{shown:?}");
