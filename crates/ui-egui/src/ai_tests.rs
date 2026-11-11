@@ -33,6 +33,8 @@ fn with_ai(u: &mut Ui) {
         name: "FigCraft",
         version: "0",
         app_token: "",
+        uses_ai: true,
+        endpoints: craft_publik::Endpoints::DEFAULT,
         dialects: &["chat_completions", "images"],
         config_dir: None,
     };
@@ -250,14 +252,34 @@ fn the_ai_windows_open_from_the_menu_and_send_nothing_on_their_own() {
     assert_eq!(items, ["ai.draftCopy", "ai.generateImage"]);
 }
 
+/// The first-launch window's app facts: no token and no settings folder, so nothing is sent or written.
+fn first_launch_info() -> AppInfo {
+    AppInfo {
+        slug: "figcraft-ui-test",
+        name: "FigCraft",
+        version: "0",
+        app_token: "",
+        uses_ai: true,
+        endpoints: craft_publik::Endpoints::DEFAULT,
+        dialects: &["chat_completions"],
+        config_dir: None,
+    }
+}
+
 #[test]
-fn the_first_launch_window_opens_once_and_closing_it_counts_as_later() {
+fn the_first_launch_window_waits_for_the_gate_and_closing_it_counts_as_later() {
+    // The publik gate has not passed in a test: the first launch holds its question until it does
+    // (the gate's own screen is up until then; "Use my own key" there leads to this window).
     let mut u = Ui::new(Session::new());
-    let info = AppInfo { slug: "figcraft-ui-test", name: "FigCraft", version: "0", app_token: "", dialects: &["chat_completions"], config_dir: None };
-    u.app.ai = Some(Ai::new(info));
+    u.app.ai = Some(Ai::new(first_launch_info()));
     for _ in 0..5 {
         u.frame(vec![]);
     }
+    assert_eq!(u.app.ui.ai_dialog, None, "the first launch waits for the gate");
+    assert!(!ai(&u).first_run_checked, "and still asks once the gate passed");
+    // Past the gate, the window is due: it opens once, and closing it counts as Later.
+    u.app.ai.as_mut().unwrap().setup_due = true;
+    u.frame(vec![]);
     assert_eq!(u.app.ui.ai_dialog, Some(AiDialog::Setup), "the first launch asks");
     let shown = texts(&mut u);
     assert!(shows(&shown, "Use my own key"), "{shown:?}");
@@ -271,8 +293,7 @@ fn the_first_launch_window_opens_once_and_closing_it_counts_as_later() {
 
     // A run an agent drives doesn't ask.
     let mut u = Ui::new(Session::new());
-    let info = AppInfo { slug: "figcraft-ui-test", name: "FigCraft", version: "0", app_token: "", dialects: &["chat_completions"], config_dir: None };
-    let mut a = Ai::new(info);
+    let mut a = Ai::new(first_launch_info());
     a.skip_first_run();
     u.app.ai = Some(a);
     for _ in 0..5 {

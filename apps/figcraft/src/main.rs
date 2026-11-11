@@ -29,9 +29,9 @@ mod graphics;
 mod recovery;
 mod services;
 mod startup;
-// publik's usage counts (README: Usage counts). The file is publik's reference client, kept as it is.
-#[rustfmt::skip]
-mod publik_telemetry;
+// Sign in with publik, usage counting and the AI pay choice: this build's publik facts and the
+// gate every publik app opens with.
+mod publik;
 
 #[cfg(all(test, target_os = "macos"))]
 mod apple_events_tests;
@@ -61,6 +61,8 @@ use serde_json::json;
 struct App {
     queue: Arc<Mutex<Vec<ControlRequest>>>,
     ctx_slot: Arc<Mutex<Option<egui::Context>>>,
+    /// Sign in with publik: drawn before anything of the app until it passes.
+    gate: craft_publik::ui::Gate,
     /// The window title last sent: a viewport command asks for another frame, so it's only sent
     /// when the title changes (sending it every frame kept an idle window redrawing).
     title: String,
@@ -122,6 +124,11 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // Sign in with publik comes first: the gate draws itself until the person is signed in
+        // (and, the first time, has chosen how the app pays for AI). Nothing of the app shows before.
+        if !self.gate.ui(ui) {
+            return;
+        }
         let ctx = ui.ctx().clone();
         services::parented(frame, || with_app(|fig| figcraft_ui_egui::windows::guard(fig, &ctx, |fig| fig.ui(ui))));
     }
@@ -135,12 +142,6 @@ impl eframe::App for App {
         #[cfg(target_os = "macos")]
         std::process::exit(0);
     }
-}
-
-/// The version in publik's usage counts: the release tag without its `v`, for example `0.9.0-publik.4`.
-/// The build number comes from `packaging/PUBLIK_BUILD`, the file the bundle version comes from.
-fn publik_version() -> String {
-    format!("{}-publik.{}", env!("CARGO_PKG_VERSION"), include_str!("../../../packaging/PUBLIK_BUILD").trim())
 }
 
 fn main() -> eframe::Result {
@@ -162,7 +163,7 @@ fn main() -> eframe::Result {
     // Builder check (publikhq.com/skills/setup.md): the built app provisions publik API for real and
     // prints one line. The builder who runs it is the consent.
     if std::env::var_os("PUBLIK_SELF_TEST").is_some() {
-        println!("{}", figcraft_ui_egui::ai::self_test(&app_info()));
+        println!("{}", craft_publik::self_test(&publik::app_info()));
         return Ok(());
     }
     let args = args::parse(&args);
@@ -183,10 +184,9 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
-    // publik's usage counts: `app_opened` now, `active_session` every 30 minutes, on a background
-    // thread. After the early exits above, so `--version`, the self-test and a bad command line
-    // send nothing.
-    publik_telemetry::start("figcraft", &publik_version(), None);
+    // publik's usage counts (`app_opened` now, `active_session` every 30 minutes) start once the
+    // gate passed (`publik::app_info`, `craft_publik::ui::Gate`), so `--version`, the self-test
+    // and a bad command line send nothing.
     let port = args.control.or_else(|| std::env::var("FIGCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok()));
     // System fonts: index them in the background, then wake the UI (an idle window draws no frames)
     // to lay text out again with them.
@@ -255,7 +255,7 @@ fn main() -> eframe::Result {
     // settings folder (the choice is kept there), and a run an agent drives (--control) doesn't ask
     // unasked: Object ▸ AI and Preferences still offer it.
     if services::config_dir().is_some() {
-        let mut ai = figcraft_ui_egui::ai::Ai::new(app_info());
+        let mut ai = figcraft_ui_egui::ai::Ai::new(publik::app_info());
         if port.is_some() {
             ai.skip_first_run();
         }
@@ -327,6 +327,8 @@ fn main() -> eframe::Result {
             Ok(Box::new(App {
                 queue,
                 ctx_slot,
+                // Sign in with publik: provisioning starts now, on a worker thread; `ui` draws it.
+                gate: craft_publik::ui::Gate::new(publik::app_info()),
                 title: String::new(),
                 recovery,
                 #[cfg(target_os = "macos")]
@@ -338,19 +340,6 @@ fn main() -> eframe::Result {
     // Start again on other graphics, or say why instead of quitting silently: release builds on
     // Windows have no console.
     graphics.finish(result, frames, port.is_some())
-}
-
-/// What publik needs to know about this build. The app token is public by design (it can only mint
-/// capped keys attributed to FigCraft) and lives at the repo root so source builds carry it.
-fn app_info() -> figcraft_ui_egui::ai::AppInfo {
-    figcraft_ui_egui::ai::AppInfo {
-        slug: "figcraft",
-        name: "FigCraft",
-        version: env!("CARGO_PKG_VERSION"),
-        app_token: include_str!("../../../publik-app-token.txt"),
-        dialects: &["chat_completions", "images"],
-        config_dir: services::config_dir(),
-    }
 }
 
 /// With nothing to open, whether the window starts in a new file rather than on the home screen.

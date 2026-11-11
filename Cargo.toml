@@ -6,7 +6,7 @@ exclude = ["plugins"]
 # default-members = ["crates/*", "apps/figcraft", "apps/figcraft-cli", "xtask"]
 
 [workspace.package]
-version = "0.16.0"
+version = "0.16.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -55,6 +55,10 @@ craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "e11f9d9aebe
 craft-menu = { git = "https://github.com/storytold/craft-libs", rev = "e11f9d9aebea5f6b8e74643c1ea1ed172ba5f545" }
 # Where the settings live: the suite's folder rules, portable mode included (craft-libs).
 craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "e11f9d9aebea5f6b8e74643c1ea1ed172ba5f545" }
+# The publik module shared by the Craft apps (publikhq.com/sdk/publik.rs.md): Sign in with publik
+# (the gate), usage counting, and publik API or the person's own key. One pin for the whole
+# workspace; branch signin-gate. The crate accepts egui 0.36 and 0.37.
+craft-publik = { git = "https://github.com/Blueturboguy07/craft-publik", rev = "a342903b04a60063837814e0ac7cbb2ccba79614", features = ["egui"] }
 
 # foundation
 kurbo = { version = "0.13", features = ["serde"] }
